@@ -1,0 +1,3 @@
+device_name,device_ip
+device1,192.168.1.1
+device2,192.168.1.2
