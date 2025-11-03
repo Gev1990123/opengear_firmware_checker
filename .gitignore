@@ -1,2 +1,3 @@
 .env
 device_details.txt
+*.flash

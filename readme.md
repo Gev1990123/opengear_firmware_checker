@@ -1,15 +1,18 @@
 
 # Opengear Firmware Checker
 
-A Python script to check the firmware version of Opengear ACM devices and compare it against the latest available version from the Opengear FTP server.
+A Python script to check and optionally upgrade the firmware version of Opengear ACM700x devices by comparing against the latest or a specified version from Opengear’s public FTP archive.
 
 ## Features
 
 - Retrieves the latest firmware version from Opengear's public FTP.
+- Optionally upgrades devices to a specified firmware version using --version.
 - Authenticates with each device using API credentials.
 - Fetches the current firmware version from each device.
-- Compares device firmware with the latest available version.
-- Outputs a summary of devices and whether an update is required.
+- Compares device firmware with the target version.
+- Uploads and installs firmware via SSH if an upgrade is required.
+- Waits for device reboot and confirms upgrade success.
+- Outputs a summary of devices and upgrade status.
 
 ## Requirements
 
@@ -17,6 +20,7 @@ A Python script to check the firmware version of Opengear ACM devices and compar
 - `requests`
 - `python-dotenv`
 - `beautifulsoup4`
+- `netmiko`
 
 Install dependencies:
 
@@ -36,11 +40,15 @@ device1,192.168.1.1
 
 ## Usage
 
-- Run the script:
+- Check and upgrade to the latest firmware:
 ```bash
 python firmware_check.py
 ```
-The script will print a list of devices with their current firmware version and whether an update is required.
+
+- Check and upgrade to a specific firmware version:
+```bash
+python firmware_check.py --version 5.2.
+```
 
 ## Output Example
 
@@ -51,9 +59,17 @@ The script will print a list of devices with their current firmware version and 
     "device_name": "Device1",
     "device_ip": "192.168.1.1",
     "device_firmware": "4.5.3",
-    "update_required": "yes"
+    "update_required": "yes",
+    "upgrade_result": "success"
   },
-  ...
+  {
+    "checked": "2025-10-31 14:00:00",
+    "device_name": "Device2",
+    "device_ip": "192.168.1.2",
+    "device_firmware": "5.2.4",
+    "update_required": "no",
+    "upgrade_result": "skipped"
+  }
 ]
 ```
 
@@ -61,3 +77,4 @@ The script will print a list of devices with their current firmware version and 
 
 - SSL verification is disabled in this script to support self-signed certificates. Use with caution in production environments.
 - Ensure your Opengear devices have the API enabled and are reachable from the machine running this script.
+- Firmware files are downloaded from Opengear’s archive and cached locally to avoid repeated downloads.
