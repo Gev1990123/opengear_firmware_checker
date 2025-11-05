@@ -11,6 +11,8 @@ A Python script to check and optionally upgrade the firmware version of Opengear
 - Fetches the current firmware version from each device.
 - Compares device firmware with the target version.
 - Uploads and installs firmware via SSH if an upgrade is required.
+- Backs up device configuration before upgrade.
+- Cleans up old backup files.
 - Waits for device reboot and confirms upgrade success.
 - Outputs a summary of devices and upgrade status.
 
@@ -47,7 +49,7 @@ python firmware_check.py
 
 - Check and upgrade to a specific firmware version:
 ```bash
-python firmware_check.py --version 5.2.
+python firmware_check.py --version 5.2.3
 ```
 
 ## Output Example
@@ -78,3 +80,4 @@ python firmware_check.py --version 5.2.
 - SSL verification is disabled in this script to support self-signed certificates. Use with caution in production environments.
 - Ensure your Opengear devices have the API enabled and are reachable from the machine running this script.
 - Firmware files are downloaded from Opengear’s archive and cached locally to avoid repeated downloads.
+- During firmware upgrades, the device will reboot, which may cause the SSH session to close unexpectedly. This is normal behavior and is handled gracefully by the script.

@@ -9,6 +9,7 @@ from netmiko import ConnectHandler, file_transfer
 import time
 import socket
 import argparse
+from paramiko.ssh_exception import SSHException
 
 load_dotenv()
 
@@ -40,9 +41,7 @@ def latest_version():
     else:
         raise ValueError("No firmware versions found.")
 
-
-def upload_and_upgrade(host, username, password, firmware_path, filename):
-
+def ssh_connection(host, username, password, secret):
     device = {
         "device_type": "linux",
         "host": host,
@@ -50,11 +49,14 @@ def upload_and_upgrade(host, username, password, firmware_path, filename):
         "password": password,
         "secret": secret
     }
+    
+    conn = ConnectHandler(**device)
+
+    return conn
+
+def upload_and_upgrade(conn, host, firmware_path, filename):
 
     print(f'Connecting to {host}')
-
-    conn = ConnectHandler(**device)
-    conn.enable()
 
     print(f"Uploading filename {filename} to /tmp on {host}")
     transfer_result = file_transfer(conn, source_file=firmware_path, dest_file=f"{filename}", file_system="/tmp", direction="put", overwrite_file=True)
@@ -62,17 +64,22 @@ def upload_and_upgrade(host, username, password, firmware_path, filename):
 
     print(f"Running firmware upgrade on {host}")
     cmd = f"sudo netflash -l /tmp/{filename}"
-    output = conn.send_command_timing(cmd, delay_factor=5)
+    try:
+        output = conn.send_command_timing(cmd, delay_factor=5)
 
-    if "password" in output.lower():
-        output += conn.send_command_timing(f"{password}\n", delay_factor=5)
+        if "password" in output.lower():
+            output += conn.send_command_timing(f"{password}\n", delay_factor=5)
 
-    if "Are you sure" in output:
-        output += conn.send_command_timing("y", delay_factor=5)
+        if "Are you sure" in output:
+            output += conn.send_command_timing("y", delay_factor=5)
 
-    print(output)
-    conn.disconnect()
-
+    except (socket.error, SSHException) as e:
+        print(f"[INFO] SSH session closed during upgrade on {host} — this is expected.")
+    except Exception as e:
+        print(f"[WARNING] Unexpected error during upgrade on {host}: {e}")
+    finally:
+        conn.disconnect()
+   
     print(f"Upgrade triggered on {host}, waiting for reboot...")
     if wait_for_reboot(host):
         #version = verify_upgrade(host, username, password)
@@ -124,6 +131,75 @@ def get_firmware(version):
 
     return firmware_path, filename
 
+def backup_config(conn, host, backup_dir="backups"):
+        
+    print(f"Connecting to {host} for config backup...")
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    remote_filename = f"config_backup_{timestamp}.opg"
+    remote_path = f"/etc/config/users/lhadmin/{remote_filename}"
+    local_filename = f"{host}_config_{timestamp}.opg"
+    local_path = os.path.join(backup_dir, local_filename)
+
+    os.makedirs(backup_dir, exist_ok=True)
+
+    print(f"Creating config backup for {host}")
+    cmd = f"sudo config -e {remote_path}"
+    output = conn.send_command_timing(cmd)
+
+    if "password" in output.lower():
+        output += conn.send_command_timing(f"{password}\n")
+ 
+    if not wait_for_file(conn, remote_path):
+        return None
+
+    output = conn.send_command_timing(f"sudo chmod 644 {remote_path}")
+    if "password" in output.lower():
+        output += conn.send_command_timing(f"{password}\n")
+    
+    try:
+        file_transfer(conn, source_file=remote_filename, dest_file=local_path, file_system="/etc/config/users/lhadmin", direction="get", overwrite_file=True)
+        print(f"Backup saved to {local_path}")
+    except Exception as e:
+        print(f"SCP transfer failed: {e}")
+        local_path = None
+
+    return local_path
+ 
+def wait_for_file(conn, remote_path, timeout=60, interval=5):
+    elapsed = 0
+    while elapsed < timeout:
+        result = conn.send_command_timing(f"ls -l {remote_path}")
+        if ".opg" in result and ".opg." not in result:
+            print(f"File is ready after {elapsed} seconds.")
+            return True
+        time.sleep(interval)
+        elapsed += interval
+    print("Timeout waiting for backup file to be ready.")
+    return False
+
+def cleanup_old_backups(conn, backup_dir="/etc/config/users/lhadmin"):
+    print(f"Cleaning up old backups in {backup_dir}...")
+
+    list_cmd = f"ls {backup_dir}/*.opg"
+    output = conn.send_command_timing(list_cmd)
+    
+    if "No such file" in output or output.strip() == "":
+        print("No old backup files found.")
+        return
+
+    print("Old backup files found:\n", output)
+    
+    delete_cmd = rf"sudo find {backup_dir} -maxdepth 1 -type f -name '*.opg' -exec rm {{}} \;"
+    output = conn.send_command_timing(delete_cmd)
+
+    print(output)
+
+    if "password" in output.lower():
+        output += conn.send_command_timing(f"{password}\n")
+
+    print("Old backups deleted.")
+
 # Read devices from file
 with open('device_details.txt', 'r') as file: 
     devices = [line.strip().split(",") for line in file.readlines()[1:]]
@@ -165,7 +241,10 @@ for name, ip in devices:
 
         result = None
         if update_required == 'yes':
-            result = upload_and_upgrade(ip, username, password, firmware_path, filename)
+            conn = ssh_connection(ip, username, password, secret)
+            cleanup_old_backups(conn)
+            backup_config(conn, ip)
+            result = upload_and_upgrade(conn, ip, firmware_path, filename)
 
         device_firmware.append({
             'checked': timestamp,
