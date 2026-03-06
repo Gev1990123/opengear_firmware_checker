@@ -1,5 +1,5 @@
 
-# Opengear Firmware Checker ABC
+# Opengear Firmware Checker
 
 A Python script to check and optionally upgrade the firmware version of Opengear ACM700x devices by comparing against the latest or a specified version from Opengear’s public FTP archive.
 
